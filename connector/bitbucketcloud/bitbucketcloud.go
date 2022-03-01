@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -421,7 +422,18 @@ type group struct {
 }
 
 func (b *bitbucketConnector) userTeamGroups(ctx context.Context, client *http.Client, teamName string) ([]string, error) {
-	apiURL := b.legacyAPIURL + "/groups/" + teamName
+	apiURL := ""
+
+	if len(b.teams) > 0 {
+		query := url.Values{}
+		for _, group := range b.teams {
+			query.Add("group", group)
+		}
+
+		apiURL = b.legacyAPIURL + "/groups?" + query.Encode()
+	} else {
+		apiURL = b.legacyAPIURL + "/groups/" + teamName
+	}
 
 	var response []group
 	if err := get(ctx, client, apiURL, &response); err != nil {
