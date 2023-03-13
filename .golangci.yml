@@ -1,5 +1,7 @@
 run:
-    timeout: 2m
+    timeout: 4m
+    skip-dirs:
+        - storage/ent/db # generated ent code
 
 linters-settings:
     depguard:
@@ -18,8 +20,6 @@ linters-settings:
 linters:
     disable-all: true
     enable:
-        - bodyclose
-        - deadcode
         - depguard
         - dogsled
         - exhaustive
@@ -39,18 +39,21 @@ linters:
         - nolintlint
         - prealloc
         - revive
-        - rowserrcheck
         - sqlclosecheck
         - staticcheck
-        - structcheck
         - stylecheck
-        - tparallel
-        - typecheck
         - unconvert
-        - unparam
         - unused
-        - varcheck
         - whitespace
+
+        # Disable temporarily until everything works with Go 1.20
+        # - bodyclose
+        # - rowserrcheck
+        # - tparallel
+        # - unparam
+
+        # Disable temporarily until everything works with Go 1.18
+        - typecheck
 
         # TODO: fix linter errors before enabling
         # - exhaustivestruct

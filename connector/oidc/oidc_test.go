@@ -271,11 +271,28 @@ func TestHandleCallback(t *testing.T) {
 				"cognito:groups": []string{"group3", "group4"},
 			},
 		},
+		{
+			name:               "singularGroupResponseAsString",
+			userIDKey:          "", // not configured
+			userNameKey:        "", // not configured
+			expectUserID:       "subvalue",
+			expectUserName:     "namevalue",
+			expectGroups:       []string{"group1"},
+			expectedEmailField: "emailvalue",
+			token: map[string]interface{}{
+				"sub":            "subvalue",
+				"name":           "namevalue",
+				"groups":         "group1",
+				"email":          "emailvalue",
+				"email_verified": true,
+			},
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			testServer, err := setupServer(tc.token)
+			idTokenDesired := true
+			testServer, err := setupServer(tc.token, idTokenDesired)
 			if err != nil {
 				t.Fatal("failed to setup test server", err)
 			}
@@ -331,7 +348,87 @@ func TestHandleCallback(t *testing.T) {
 	}
 }
 
-func setupServer(tok map[string]interface{}) (*httptest.Server, error) {
+func TestRefresh(t *testing.T) {
+	t.Helper()
+
+	tests := []struct {
+		name           string
+		expectUserID   string
+		expectUserName string
+		idTokenDesired bool
+		token          map[string]interface{}
+	}{
+		{
+			name:           "IDTokenOnRefresh",
+			expectUserID:   "subvalue",
+			expectUserName: "namevalue",
+			idTokenDesired: true,
+			token: map[string]interface{}{
+				"sub":  "subvalue",
+				"name": "namevalue",
+			},
+		},
+		{
+			name:           "NoIDTokenOnRefresh",
+			expectUserID:   "subvalue",
+			expectUserName: "namevalue",
+			idTokenDesired: false,
+			token: map[string]interface{}{
+				"sub":  "subvalue",
+				"name": "namevalue",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			testServer, err := setupServer(tc.token, tc.idTokenDesired)
+			if err != nil {
+				t.Fatal("failed to setup test server", err)
+			}
+			defer testServer.Close()
+
+			scopes := []string{"openid", "offline_access"}
+			serverURL := testServer.URL
+			config := Config{
+				Issuer:       serverURL,
+				ClientID:     "clientID",
+				ClientSecret: "clientSecret",
+				Scopes:       scopes,
+				RedirectURI:  fmt.Sprintf("%s/callback", serverURL),
+				GetUserInfo:  true,
+			}
+
+			conn, err := newConnector(config)
+			if err != nil {
+				t.Fatal("failed to create new connector", err)
+			}
+
+			req, err := newRequestWithAuthCode(testServer.URL, "someCode")
+			if err != nil {
+				t.Fatal("failed to create request", err)
+			}
+
+			refreshTokenStr := "{\"RefreshToken\":\"asdf\"}"
+			refreshToken := []byte(refreshTokenStr)
+
+			identity := connector.Identity{
+				UserID:        tc.expectUserID,
+				Username:      tc.expectUserName,
+				ConnectorData: refreshToken,
+			}
+
+			refreshIdentity, err := conn.Refresh(req.Context(), connector.Scopes{OfflineAccess: true}, identity)
+			if err != nil {
+				t.Fatal("Refresh failed", err)
+			}
+
+			expectEquals(t, refreshIdentity.UserID, tc.expectUserID)
+			expectEquals(t, refreshIdentity.Username, tc.expectUserName)
+		})
+	}
+}
+
+func setupServer(tok map[string]interface{}, idTokenDesired bool) (*httptest.Server, error) {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate rsa key: %v", err)
@@ -368,11 +465,23 @@ func setupServer(tok map[string]interface{}) (*httptest.Server, error) {
 		}
 
 		w.Header().Add("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(&map[string]string{
-			"access_token": token,
-			"id_token":     token,
-			"token_type":   "Bearer",
-		})
+		if idTokenDesired {
+			json.NewEncoder(w).Encode(&map[string]string{
+				"access_token": token,
+				"id_token":     token,
+				"token_type":   "Bearer",
+			})
+		} else {
+			json.NewEncoder(w).Encode(&map[string]string{
+				"access_token": token,
+				"token_type":   "Bearer",
+			})
+		}
+	})
+
+	mux.HandleFunc("/userinfo", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Add("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(tok)
 	})
 
 	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
