@@ -422,18 +422,28 @@ type group struct {
 }
 
 func (b *bitbucketConnector) userTeamGroups(ctx context.Context, client *http.Client, teamName string) ([]string, error) {
-	apiURL := ""
-
 	if len(b.teams) > 0 {
-		query := url.Values{}
-		for _, group := range b.teams {
-			query.Add("group", group)
+		teamGroups := []string{}
+		for _, g := range b.teams {
+			query := url.Values{}
+			query.Add("group", g)
+
+			apiURL := b.legacyAPIURL + "/groups?" + query.Encode()
+
+			var response []group
+			if err := get(ctx, client, apiURL, &response); err != nil {
+				return nil, fmt.Errorf("get user team %q groups: %v", teamName, err)
+			}
+
+			for _, group := range response {
+				teamGroups = append(teamGroups, teamName+"/"+group.Slug)
+			}
 		}
 
-		apiURL = b.legacyAPIURL + "/groups?" + query.Encode()
-	} else {
-		apiURL = b.legacyAPIURL + "/groups/" + teamName
+		return teamGroups, nil
 	}
+
+	apiURL := b.legacyAPIURL + "/groups/" + teamName
 
 	var response []group
 	if err := get(ctx, client, apiURL, &response); err != nil {
